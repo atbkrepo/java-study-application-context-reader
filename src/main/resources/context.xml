@@ -1,0 +1,22 @@
+<!-- SAX Parser -->
+<beans>
+    <!-- Class <?> clazz =  Class.forName (className)-->
+    <!-- clazz.newInstance() -->
+    <bean id="mailServicePOP" class="com.study.MailService">
+        <property name="port" value="1099"/>
+        <property name="protocol" value="POP3"/>
+    </bean>
+
+    <bean id="userService" class="com.study.DefaultUserService">
+        <property name="mailService" ref="mailServicePOP"/>
+    </bean>
+
+    <bean id="mailServiceIMAP" class="com.study.MailService">
+        <property name="port" value="1099"/>
+        <property name="protocol" value="IMAO"/>
+    </bean>
+
+    <bean id="userServiceImap" class="com.study.DefaultUserService">
+        <property name="mailService" ref="mailServiceIMAP"/>
+    </bean>
+</beans>
