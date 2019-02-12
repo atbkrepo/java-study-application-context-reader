@@ -10,7 +10,10 @@ import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.util.LinkedList;
 import java.util.List;
+import java.util.Map;
 import java.util.stream.Collectors;
+
+import static com.study.utils.Util.initCap;
 
 public class GenericApplicationContext implements ApplicationContext {
 
@@ -18,61 +21,82 @@ public class GenericApplicationContext implements ApplicationContext {
     private BeanDefinitionReader definitionReader;
     private List<Bean> beans;
 
-    public GenericApplicationContext(String... paths) throws IllegalAccessException, InstantiationException, ClassNotFoundException, NoSuchMethodException, InvocationTargetException {
+    public GenericApplicationContext(String... paths) throws IllegalAccessException, InstantiationException, ClassNotFoundException, NoSuchMethodException, InvocationTargetException, NoSuchFieldException {
         this(new XmlBeanDefinitionReader(paths));
         beanDefinitions = definitionReader.readBeanDefinitions();
 
         //System.out.println(beanDefinitions);
         beans = new LinkedList<>();
         createBeans();
-        injectValueDependencies();
-        injectRefDependencies();
+
     }
 
     public GenericApplicationContext(BeanDefinitionReader definitionReader) {
         this.definitionReader = definitionReader;
     }
 
-    private void createBeans() throws ClassNotFoundException, IllegalAccessException, InstantiationException {
+    private void createBeans() throws ClassNotFoundException, IllegalAccessException, InstantiationException, NoSuchMethodException, InvocationTargetException, NoSuchFieldException {
         for (BeanDefinition definition : beanDefinitions) {
             Bean bean = new Bean();
             bean.setId(definition.getId());
             Class clazz = Class.forName(definition.getClassName());
             Object value = clazz.newInstance();
             bean.setValue(value);
+
+            injectValueDependencies(definition, bean.getValue());
+            injectRefDependencies(definition, bean.getValue());
             beans.add(bean);
         }
 
     }
 
-    private void injectValueDependencies() throws ClassNotFoundException, NoSuchMethodException, InvocationTargetException, IllegalAccessException {
-        for (BeanDefinition definition : beanDefinitions) {
-            Class clazz = Class.forName(definition.getClassName());
+    private void injectValueDependencies(BeanDefinition beanDefinition, Object bean) throws ClassNotFoundException, NoSuchMethodException, InvocationTargetException, IllegalAccessException, NoSuchFieldException {
+        for (Map.Entry<String, String> entry : beanDefinition.getValueDependencies().entrySet()) {
 
-            for (Field field : clazz.getDeclaredFields()) {
-                String value = definition.getValueDependencies().get(field.getName());
-                if (value != null) {
-                    char[] fieldName = field.getName().toCharArray();
-                    fieldName[0] = Character.toUpperCase(fieldName[0]);
-                    Method method = clazz.getMethod("set" + new String(fieldName),int.class);
-                    method.invoke(getBean(definition.getId(), clazz), value);
+            Class<?> clazz = Class.forName(beanDefinition.getClassName());
+            String methodName = "set" + initCap(entry.getKey());
+
+            for (Method method : clazz.getMethods()) {
+                if (method.getName().equals(methodName)) {
+                    Field field = clazz.getDeclaredField(entry.getKey());
+                    if (field.getType().isPrimitive()) {
+                        if (int.class.equals(field.getType())) {
+                            method.invoke(bean, Integer.valueOf(entry.getValue()));
+                        } else if (long.class.equals(field.getType())) {
+                            method.invoke(bean, Long.valueOf(entry.getValue()));
+                        } else if (char.class.equals(field.getType())) {
+                            method.invoke(bean, entry.getValue().toCharArray()[0]);
+                        } else if (short.class.equals(field.getType())) {
+                            method.invoke(bean, Short.valueOf(entry.getValue()));
+                        } else if (boolean.class.equals(field.getType())) {
+                            method.invoke(bean, Boolean.valueOf(entry.getValue()));
+                        } else if (byte.class.equals(field.getType())) {
+                            method.invoke(bean, Byte.valueOf(entry.getValue()));
+                        }
+                    } else {
+                        method.invoke(bean, entry.getValue());
+                    }
+
+                    break;
                 }
             }
         }
 
     }
 
-    private void injectRefDependencies() throws ClassNotFoundException, NoSuchMethodException, InvocationTargetException, IllegalAccessException {
-        for (BeanDefinition definition : beanDefinitions) {
-            Class clazz = Class.forName(definition.getClassName());
+    private void injectRefDependencies(BeanDefinition beanDefinition, Object bean) throws ClassNotFoundException, NoSuchMethodException, InvocationTargetException, IllegalAccessException, NoSuchFieldException {
+        for (Map.Entry<String, String> entry : beanDefinition.getRefDependencies().entrySet()) {
 
-            for (Field field : clazz.getDeclaredFields()) {
-                String ref = definition.getRefDependencies().get(field.getName());
-                if (ref != null) {
-                    char[] fieldName = field.getName().toCharArray();
-                    fieldName[0] = Character.toUpperCase(fieldName[0]);
-                    Method method = clazz.getMethod("set" + new String(fieldName));
-                    method.invoke(getBean(definition.getId(), clazz), getBean(ref));
+            Class<?> clazz = Class.forName(beanDefinition.getClassName());
+            String methodName = "set" + initCap(entry.getKey());
+
+            for (Method method : clazz.getMethods()) {
+                if (method.getName().equals(methodName)) {
+                    Field field = clazz.getDeclaredField(entry.getKey());
+                    method.invoke(bean, field.getType().cast(((Bean)getBean(entry.getValue())).getValue()));
+
+
+                    break;
                 }
             }
         }
@@ -87,19 +111,26 @@ public class GenericApplicationContext implements ApplicationContext {
     }
 
     @Override
-    public List<Object> getBean(Class clazz) {
+    public <T> List<T> getBean(Class<T> clazz) {
         if (clazz == null || beans == null || beans.size() == 0) {
             return null;
         }
-        return beans.stream().filter(bean -> bean.getValue().getClass().equals(clazz)).collect(Collectors.toList());
+        return beans.stream()
+                .filter(bean -> bean.getValue().getClass().equals(clazz))
+                .map(clazz::cast)
+                .collect(Collectors.toList());
     }
 
     @Override
-    public Object getBean(String beanId, Class clazz) {
+    public <T> T getBean(String beanId, Class<T> clazz) {
         if (beanId == null || beanId.isEmpty() || clazz == null || beans == null || beans.size() == 0) {
             return null;
         }
-        return beans.stream().filter(bean -> bean.getValue().getClass().equals(clazz) && bean.getId().equals(beanId)).findAny().orElse(null);
+        return beans.stream()
+                .filter(bean -> bean.getValue().getClass().equals(clazz) && bean.getId().equals(beanId))
+                .findAny()
+                .map(clazz::cast)
+                .orElse(null);
     }
 
     @Override

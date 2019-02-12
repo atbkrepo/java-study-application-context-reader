@@ -20,4 +20,10 @@ public class Util {
             return null;
         }
     }
+
+    public static String initCap(String value){
+        char[] valueChars = value.toCharArray();
+        valueChars[0] = Character.toUpperCase(valueChars[0]);
+        return new String(valueChars);
+    }
 }
